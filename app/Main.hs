@@ -1,6 +1,9 @@
+{-# LANGUAGE TemplateHaskell #-}
+
 module Main where
 
 import Codec.Archive.Zip
+import Control.Monad ((<=<))
 import Control.Monad.IO.Class
 import Data.ByteString.Char8 (unpack, pack)
 import Data.List
@@ -11,52 +14,23 @@ import System.Environment
 import System.Exit
 
 
-
 main :: IO ()
-main = do
-  file <- resolveFile' . head =<< getArgs
+main = getArgs >>= mapM_ (process <=< resolveFile')
 
-  worddir <- parseRelDir "word"
-  relsdir <- parseRelDir "_rels"
-  xmlfile <- parseRelFile "document.xml.rels"
+process file = withArchive file $ do
+    relsfile <- mkEntrySelector $(mkRelFile "word/_rels/document.xml.rels")
+    xml <- unpack <$> getEntry relsfile
+    [newxml] <- liftIO . runX $ processXML xml
+    addEntry Deflate (pack newxml) relsfile
 
-  sel <- mkEntrySelector $ worddir </> relsdir </> xmlfile
-
-  withArchive file $ do
-
-    xml <- unpack <$> getEntry sel
-
-    [newxml] <- liftIO . runX $ application xml
-
-    liftIO $ putStrLn xml
-    liftIO $ putStrLn "====================================="
-    liftIO $ putStrLn newxml
-
-    addEntry Deflate (pack newxml) sel
-
-    return ()
-
-
-  --exitSuccess
-  -- [rc] <- runX (application file1 file2)
-  -- if rc >= c_err
-  --   then exitWith (ExitFailure (-1))
-  --   else exitSuccess
-
-
-application xml = readString [] xml
-              >>> fixHyperlinks
-              >>> writeDocumentToString []
-
+processXML xml = readString [] xml
+             >>> fixHyperlinks
+             >>> writeDocumentToString []
 
 fixHyperlinks :: ArrowXml a => a XmlTree XmlTree
-fixHyperlinks = processTopDown editHyperlink
-  where
-    editHyperlink
-      = processAttrl (changeAttrValue replaceSpace `when` hasName "Target")
-       `when`
-       (isElem >>> hasName "Relationship")
-
+fixHyperlinks = processTopDown
+  $ processAttrl (changeAttrValue replaceSpace `when` hasName "Target")
+    `when` (isElem >>> hasName "Relationship")
 
 replaceSpace :: String -> String
 replaceSpace [] = []
