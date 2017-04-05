@@ -15,14 +15,16 @@ import System.Exit
 
 
 main :: IO ()
-main = getArgs >>= mapM_ (process <=< resolveFile')
+main = getArgs >>= mapM_ (flip withArchive processZip <=< resolveFile')
 
-process file = withArchive file $ do
+processZip :: ZipArchive ()
+processZip = do
     relsfile <- mkEntrySelector $(mkRelFile "word/_rels/document.xml.rels")
     xml <- unpack <$> getEntry relsfile
     [newxml] <- liftIO . runX $ processXML xml
     addEntry Deflate (pack newxml) relsfile
 
+processXML :: String -> IOSLA (XIOState s) a String
 processXML xml = readString [] xml
              >>> fixHyperlinks
              >>> writeDocumentToString []
